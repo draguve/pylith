@@ -214,17 +214,39 @@ class App(GenerateMesh):
             self.BOX_SIDE_LENGTH + 1400 * 1000,
         )
 
-        slab = gmsh.model.occ.add_box(
-            -self.BOX_SIDE_LENGTH,
-            -self.BOX_SIDE_LENGTH,
-            30 * 1000-self.BOX_DEPTH_LENGTH/2,
-            self.BOX_SIDE_LENGTH*2,
-            self.BOX_SIDE_LENGTH,
-            self.SLAB_THICKNESS
-        )
-        gmsh.model.occ.rotate([(3,slab)],0,0,0,1,0,0,math.radians(-20))
+        # slab = gmsh.model.occ.add_box(
+        #     -self.BOX_SIDE_LENGTH,
+        #     -self.BOX_SIDE_LENGTH,
+        #     30 * 1000-self.BOX_DEPTH_LENGTH/2,
+        #     self.BOX_SIDE_LENGTH*2,
+        #     self.BOX_SIDE_LENGTH,
+        #     self.SLAB_THICKNESS
+        # )
+        x = -self.BOX_SIDE_LENGTH
+        y = -self.BOX_SIDE_LENGTH
+        z = 60 * 1000 - self.BOX_DEPTH_LENGTH / 2
+        x_extent = self.BOX_SIDE_LENGTH * 2
+        y_extent = self.BOX_SIDE_LENGTH
+        height = -self.SLAB_THICKNESS  # Negative to extrude down
+        top_surface = self.add_plane_surface_at_point(x, y, z, x_extent, y_extent)
+
+        gmsh.model.occ.rotate([(2,top_surface)],0,0,0,1,0,0,math.radians(-20))
         gmsh.model.occ.fragment([(3, 1)], [(2,crust_surface)])
-        gmsh.model.occ.fragment([(3, 3),(3,4)],[(3,2)])
+
+        gmsh.model.occ.synchronize()
+
+        space = np.linspace(0, 1, 10)
+        xv, yv = np.meshgrid(space, space)
+        parametricCoords = np.column_stack((xv.flatten(), yv.flatten())).ravel()
+        normals = gmsh.model.getNormal(top_surface,parametricCoords)
+        normal = np.average(normals.reshape(-1, 3),axis=0)
+
+        dx = -self.SLAB_THICKNESS * normal[0]
+        dy = -self.SLAB_THICKNESS * normal[1]
+        dz = -self.SLAB_THICKNESS * normal[2]
+        slab_volume = gmsh.model.occ.extrude([(2,top_surface)],dx=dx,dy=dy,dz=dz,recombine=True)
+
+        gmsh.model.occ.fragment([(3, 1),(3,2)],[(3,3)])
         #
         # gmsh.model.occ.fragment([(3,2)],[(3,1)])
         # gmsh.model.occ.remove([(3,3)], recursive=True)
