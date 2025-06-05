@@ -33,6 +33,8 @@ class App(GenerateMesh):
     DX_MIN = 1.0e+4
     DX_BIAS = 1.2
 
+    CRUST_DEPTH = 30.0 * 1000
+
     def __init__(self):
         """Constructor.
         """
@@ -96,10 +98,28 @@ class App(GenerateMesh):
         wire = gmsh.model.occ.add_wire([spline])
         return spline,wire
 
+    @staticmethod
+    def add_plane_surface_at_point(x, y, z, x_extent, y_extent):
+        p1 = gmsh.model.occ.add_point(x, y, z)
+        p2 = gmsh.model.occ.add_point(x + x_extent, y, z)
+        p3 = gmsh.model.occ.add_point(x + x_extent, y + y_extent, z)
+        p4 = gmsh.model.occ.add_point(x, y + y_extent, z)
+
+        l1 = gmsh.model.occ.add_line(p1, p2)
+        l2 = gmsh.model.occ.add_line(p2, p3)
+        l3 = gmsh.model.occ.add_line(p3, p4)
+        l4 = gmsh.model.occ.add_line(p4, p1)
+
+        loop = gmsh.model.occ.add_curve_loop([l1, l2, l3, l4])
+        surface = gmsh.model.occ.add_plane_surface([loop])
+        return surface
+
 
     def create_geometry(self):
         """Create geometry.
         """
+        gmsh.option.setNumber("Mesh.MeshSizeMin", self.DX_MIN) #delete this later
+        gmsh.option.setNumber("Mesh.MeshSizeMax", self.DX_MIN)
         crs_wgs84_3d = CRS.from_epsg(4979)
         crs_projected = CRS.from_proj4(
             "+proj=tmerc +datum=WGS84 +lat_0=45.5231 +lon_0=-122.6765 +k=0.9996 +units=m +type=crs"
@@ -142,38 +162,38 @@ class App(GenerateMesh):
 
         projected_contours_up_dip = self._generate_extended_contours(projected_contours)
         projected_contours = projected_contours_up_dip | projected_contours
+        #
+        # wires = []
+        # sorted_project_contours = [v for k, v in sorted(projected_contours.items())]
+        # for projected_contour in sorted_project_contours:
+        #     spline,wire = self._generate_gmsh_contour(projected_contour)
+        #     wires.append(wire)
+        #
+        # slab_top_surface = gmsh.model.occ.add_thru_sections(wires,makeSolid=False, makeRuled=False,maxDegree=2)
+        # gmsh.model.occ.synchronize()
 
-        wires = []
-        sorted_project_contours = [v for k, v in sorted(projected_contours.items())]
-        for projected_contour in sorted_project_contours:
-            spline,wire = self._generate_gmsh_contour(projected_contour)
-            wires.append(wire)
+        # space = np.linspace(0, 1, 10)
+        # xv, yv = np.meshgrid(space, space)
+        # parametricCoords = np.column_stack((xv.flatten(), yv.flatten())).ravel()
+        # normals = gmsh.model.getNormal(slab_top_surface[0][1],parametricCoords)
+        # normal = np.average(normals.reshape(-1, 3),axis=0)
 
-        slab_top_surface = gmsh.model.occ.add_thru_sections(wires,makeSolid=False, makeRuled=False,maxDegree=2)
-        gmsh.model.occ.synchronize()
+        # dx = -self.SLAB_THICKNESS * normal[0]
+        # dy = -self.SLAB_THICKNESS * normal[1]
+        # dz = -self.SLAB_THICKNESS * normal[2]
+        # slab_volume = gmsh.model.occ.extrude(slab_top_surface,dx=dx,dy=dy,dz=dz,recombine=True)
+        #
+        # #Splay Fault
+        # splay_bottom = np.copy(projected_contours[15])
+        # splay_top = np.copy(projected_contours[15])
+        #
+        # splay_bottom[:, 2] -= 8.0e+3
+        # _,splay_bottom_wire = self._generate_gmsh_contour(splay_bottom)
 
-        space = np.linspace(0, 1, 10)
-        xv, yv = np.meshgrid(space, space)
-        parametricCoords = np.column_stack((xv.flatten(), yv.flatten())).ravel()
-        normals = gmsh.model.getNormal(slab_top_surface[0][1],parametricCoords)
-        normal = np.average(normals.reshape(-1, 3),axis=0)
-
-        dx = -self.SLAB_THICKNESS * normal[0]
-        dy = -self.SLAB_THICKNESS * normal[1]
-        dz = -self.SLAB_THICKNESS * normal[2]
-        slab_volume = gmsh.model.occ.extrude(slab_top_surface,dx=dx,dy=dy,dz=dz,recombine=True)
-
-        #Splay Fault
-        splay_bottom = np.copy(projected_contours[15])
-        splay_top = np.copy(projected_contours[15])
-
-        splay_bottom[:, 2] -= 8.0e+3
-        _,splay_bottom_wire = self._generate_gmsh_contour(splay_bottom)
-
-        splay_top[:, 2] = 3.0e+3
-        splay_top[:, 0] -= 24.0e+3
-        _,splay_top_wire = self._generate_gmsh_contour(splay_top)
-        splay_surface = gmsh.model.occ.add_thru_sections([splay_bottom_wire,splay_top_wire], makeSolid=False, makeRuled=False, maxDegree=2)
+        # splay_top[:, 2] = 3.0e+3
+        # splay_top[:, 0] -= 24.0e+3
+        # _,splay_top_wire = self._generate_gmsh_contour(splay_top)
+        # splay_surface = gmsh.model.occ.add_thru_sections([splay_bottom_wire,splay_top_wire], makeSolid=False, makeRuled=False, maxDegree=2)
 
         bounding_box = gmsh.model.occ.add_box(
             -self.BOX_SIDE_LENGTH/2,
@@ -184,14 +204,38 @@ class App(GenerateMesh):
             self.BOX_DEPTH_LENGTH
         )
         gmsh.model.occ.fragment(topography_surface,[[3,bounding_box]])
-        gmsh.model.occ.remove([(3, 3),(2,20)], recursive=True)
+        gmsh.model.occ.remove([(3, 2)], recursive=True)
 
-        gmsh.model.occ.fragment([(3,2)],[(3,1)])
-        gmsh.model.occ.remove([(3,3)], recursive=True)
+        crust_surface = self.add_plane_surface_at_point(
+            -self.BOX_SIDE_LENGTH / 2 - 700 * 1000,
+            -self.BOX_SIDE_LENGTH / 2 - 700 * 1000,
+            -1 * 1000 - self.CRUST_DEPTH,  # Crust side of the bounding box about is approximately -1km below 0
+            self.BOX_SIDE_LENGTH + 1400 * 1000,
+            self.BOX_SIDE_LENGTH + 1400 * 1000,
+        )
 
-        gmsh.model.occ.fragment([(3,1)],splay_surface)
-        gmsh.model.occ.remove_all_duplicates()
+        slab = gmsh.model.occ.add_box(
+            -self.BOX_SIDE_LENGTH,
+            -self.BOX_SIDE_LENGTH,
+            30 * 1000-self.BOX_DEPTH_LENGTH/2,
+            self.BOX_SIDE_LENGTH*2,
+            self.BOX_SIDE_LENGTH,
+            self.SLAB_THICKNESS
+        )
+        gmsh.model.occ.rotate([(3,slab)],0,0,0,1,0,0,math.radians(-20))
+        gmsh.model.occ.fragment([(3, 1)], [(2,crust_surface)])
+        gmsh.model.occ.fragment([(3, 3),(3,4)],[(3,2)])
+        #
+        # gmsh.model.occ.fragment([(3,2)],[(3,1)])
+        # gmsh.model.occ.remove([(3,3)], recursive=True)
+        #
+        # gmsh.model.occ.fragment([(3,1)],splay_surface)
+        # gmsh.model.occ.remove_all_duplicates()
+
+
+
         gmsh.model.occ.synchronize()
+        gmsh.fltk.run()
 
 
     def mark(self):
@@ -208,21 +252,21 @@ class App(GenerateMesh):
         This method is abstract in the base class and must be implemented
         in our local App class.
         """
-        gmsh.option.set_number("Mesh.MeshSizeFromPoints", 0)
-        gmsh.option.set_number("Mesh.MeshSizeFromCurvature", 0)
-        gmsh.option.set_number("Mesh.MeshSizeExtendFromBoundary", 0)
-
-        _, slab_surfaces = gmsh.model.getAdjacencies(3, 2)
-        _, wedge_surfaces = gmsh.model.getAdjacencies(3, 4)
-        high_res_surfaces = list(set(slab_surfaces) | set(wedge_surfaces))
-
-        field_distance = gmsh.model.mesh.field.add("Distance")
-        gmsh.model.mesh.field.setNumbers(field_distance, "SurfacesList", high_res_surfaces)
-
-        field_size = gmsh.model.mesh.field.add("MathEval")
-        math_exp = GenerateMesh.get_math_progression(field_distance, min_dx=self.DX_MIN, bias=self.DX_BIAS)
-        gmsh.model.mesh.field.setString(field_size, "F", math_exp)
-        gmsh.model.mesh.field.setAsBackgroundMesh(field_size)
+        # gmsh.option.set_number("Mesh.MeshSizeFromPoints", 0)
+        # gmsh.option.set_number("Mesh.MeshSizeFromCurvature", 0)
+        # gmsh.option.set_number("Mesh.MeshSizeExtendFromBoundary", 0)
+        #
+        # _, slab_surfaces = gmsh.model.getAdjacencies(3, 2)
+        # _, wedge_surfaces = gmsh.model.getAdjacencies(3, 4)
+        # high_res_surfaces = list(set(slab_surfaces) | set(wedge_surfaces))
+        #
+        # field_distance = gmsh.model.mesh.field.add("Distance")
+        # gmsh.model.mesh.field.setNumbers(field_distance, "SurfacesList", high_res_surfaces)
+        #
+        # field_size = gmsh.model.mesh.field.add("MathEval")
+        # math_exp = GenerateMesh.get_math_progression(field_distance, min_dx=self.DX_MIN, bias=self.DX_BIAS)
+        # gmsh.model.mesh.field.setString(field_size, "F", math_exp)
+        # gmsh.model.mesh.field.setAsBackgroundMesh(field_size)
 
         gmsh.model.mesh.generate(3)
         gmsh.model.mesh.optimize("Laplace2D")
